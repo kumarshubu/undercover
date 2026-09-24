@@ -126,14 +126,25 @@ export function GameOverScreen({
   state,
   onPlayAgain,
   onNewSetup,
+  onShowLeaderboard,
 }: {
   state: GameState;
   onPlayAgain: () => void;
   onNewSetup: () => void;
+  onShowLeaderboard?: () => void;
 }) {
+  const earned = (id: string) => (state.scores[id] ?? 0) - (state.scoresAtStart[id] ?? 0);
   const guesser = state.winner === 'mrWhiteGuess' ? pending(state) : undefined;
-  const why =
-    state.winner === 'mrWhiteGuess'
+  // The last one out walked out rather than being voted out: the game ended
+  // on a departure, which pays nobody.
+  const lastOut = state.players.reduce<(typeof state.players)[number] | undefined>(
+    (a, p) => (p.eliminationOrder !== null && (!a || p.eliminationOrder > a.eliminationOrder!) ? p : a),
+    undefined,
+  );
+  const walkout = lastOut?.eliminationCause === 'removed';
+  const why = walkout
+    ? `Ended when ${lastOut!.name} left. No points this game.`
+    : state.winner === 'mrWhiteGuess'
       ? `${guesser?.name} guessed “${guesser?.guess?.text}”.`
       : state.winner === 'civilians'
         ? 'Every Undercover and Mr White is out.'
@@ -162,13 +173,21 @@ export function GameOverScreen({
           <View key={p.id} style={s.row} testID={`gameover-${p.id}`}>
             <Text style={[s.rowName, p.status !== 'alive' && s.rowOut]}>{p.name}</Text>
             <Text style={s.rowRole}>{ROLE[p.role].replace(/^an? /, '')}</Text>
-            <Text style={s.rowScore}>{state.scores[p.id] ?? 0} pts</Text>
+            <Text style={s.rowScore}>+{earned(p.id)} pts</Text>
           </View>
         ))}
       </View>
-      <Note>Points are running totals across games.</Note>
+      <Note>Points from this game. Totals are on the leaderboard.</Note>
 
       <Button testID="gameover-again" label="Play again" onPress={onPlayAgain} />
+      {onShowLeaderboard && (
+        <Button
+          testID="gameover-leaderboard"
+          variant="secondary"
+          label="Leaderboard"
+          onPress={onShowLeaderboard}
+        />
+      )}
       <Button testID="gameover-setup" variant="secondary" label="New setup" onPress={onNewSetup} />
     </Screen>
   );

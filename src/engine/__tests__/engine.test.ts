@@ -489,6 +489,13 @@ describe('T — voting', () => {
     expect(after.ballots).toEqual({});
   });
 
+  it('T6b by default nobody can vote for themselves', () => {
+    const s = { ...base(), settings: { ...DEFAULT_SETTINGS, votingMode: 'secretBallot' as const } };
+    expect(reduce(s, { type: 'CAST_BALLOT', voterId: 'p0', candidateId: 'p0' }).ballots).toEqual({});
+    // Control: the same voter can still vote for someone else.
+    expect(reduce(s, { type: 'CAST_BALLOT', voterId: 'p0', candidateId: 'p1' }).ballots).toEqual({ p0: 'p1' });
+  });
+
   it('T7 BLOCKER — an all-abstain vote does not softlock the game', () => {
     // Empty tally: no victim, no tie, no interrupt. Without an explicit
     // transition the phase never changes and the screen has no button.
@@ -499,6 +506,29 @@ describe('T — voting', () => {
     expect(after.round).toBe(s.round + 1);
     expect(after.noEliminationStreak).toBe(1);
     expect(alivePlayers(after)).toHaveLength(5); // nobody eliminated
+  });
+});
+
+describe('T — endless skipping', () => {
+  it('T8 BLOCKER — after two rounds with nobody out, skipping the vote is refused', () => {
+    const secretSkip = (streak: number): GameState => {
+      const s = stateWith(['civilian', 'civilian', 'civilian', 'undercover', 'mrwhite']);
+      return {
+        ...s,
+        phase: 'voteCast',
+        noEliminationStreak: streak,
+        ballots: { p0: 'p3' },
+        settings: { ...s.settings, votingMode: 'secretBallot', allowAbstain: true },
+      };
+    };
+    // Control: one round without elimination, skipping still works.
+    expect(reduce(secretSkip(1), { type: 'ABSTAIN', voterId: 'p0' }).ballots).toEqual({});
+    // Two in a row: refused.
+    const capped = secretSkip(2);
+    expect(reduce(capped, { type: 'ABSTAIN', voterId: 'p0' })).toEqual(capped);
+    // And a vote nobody voted in cannot be closed into a third empty round.
+    const empty = { ...capped, ballots: {} };
+    expect(reduce(empty, { type: 'CLOSE_VOTING' })).toEqual(empty);
   });
 });
 

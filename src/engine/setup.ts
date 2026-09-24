@@ -75,6 +75,29 @@ export function clampRoles(counts: SetupCounts, allowNonMajorityCivilians = fals
   return isValidSetup(result, allowNonMajorityCivilians) ? result : { n, u: 1, w: 0 };
 }
 
+export const MAX_NAME_LENGTH = 16;
+
+/** Names are compared the way people read them: case and spacing don't count. */
+export const nameKey = (name: string): string => name.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * What stops these names from starting a game, or null if nothing does. Two
+ * players with one name would make the vote ambiguous and merge their points
+ * on the leaderboard, so duplicates are refused, not just discouraged.
+ */
+export function nameProblem(names: readonly string[]): string | null {
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const name = raw.trim();
+    if (name === '') return 'Every player needs a name.';
+    if (name.length > MAX_NAME_LENGTH) return `“${name}” is too long (max ${MAX_NAME_LENGTH}).`;
+    const key = nameKey(name);
+    if (seen.has(key)) return `Two players are called “${name}”.`;
+    seen.add(key);
+  }
+  return null;
+}
+
 /** Sensible starting split. Anchored on the one real data point: N=5 -> 3/1/1. */
 export function defaultRoles(n: number, allowNonMajorityCivilians = false): SetupCounts {
   const w = n >= 5 ? 1 : 0;

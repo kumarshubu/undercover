@@ -8,18 +8,26 @@
 
 import { StyleSheet, Text, View } from 'react-native';
 import type { GameAction, GameState } from '../engine/types';
-import { Body, Button, Kicker, Note, Screen, Title } from './parts';
+import { Body, Button, Kicker, Note, Screen, TextButton, Title } from './parts';
 import { c, radius, space, type } from './theme';
 
 export interface ScreenProps {
   state: GameState;
   dispatch: (action: GameAction) => void;
+  /** Opens the "who left?" sheet. Offered only while a round is running. */
+  onSomeoneLeft?: () => void;
+}
+
+export function SomeoneLeft({ onPress }: { onPress?: () => void }) {
+  return onPress ? (
+    <TextButton testID="someone-left" label="Someone left the game" onPress={onPress} />
+  ) : null;
 }
 
 export const nameOf = (s: GameState, id: string | null): string =>
   s.players.find((p) => p.id === id)?.name ?? '?';
 
-export function StarterScreen({ state, dispatch }: ScreenProps) {
+export function StarterScreen({ state, dispatch, onSomeoneLeft }: ScreenProps) {
   const [first, ...rest] = state.speakingOrder;
   return (
     <Screen testID="starter-screen">
@@ -31,11 +39,12 @@ export function StarterScreen({ state, dispatch }: ScreenProps) {
         label="Start describing"
         onPress={() => dispatch({ type: 'BEGIN_ROUND' })}
       />
+      <SomeoneLeft onPress={onSomeoneLeft} />
     </Screen>
   );
 }
 
-export function DescribeScreen({ state, dispatch }: ScreenProps) {
+export function DescribeScreen({ state, dispatch, onSomeoneLeft }: ScreenProps) {
   const { speakingOrder: order, turnIndex } = state;
   const isLast = turnIndex === order.length - 1;
   return (
@@ -62,11 +71,12 @@ export function DescribeScreen({ state, dispatch }: ScreenProps) {
         label={isLast ? 'Everyone has spoken' : 'Next speaker'}
         onPress={() => dispatch({ type: 'NEXT_SPEAKER' })}
       />
+      <SomeoneLeft onPress={onSomeoneLeft} />
     </Screen>
   );
 }
 
-export function DiscussScreen({ state, dispatch }: ScreenProps) {
+export function DiscussScreen({ state, dispatch, onSomeoneLeft }: ScreenProps) {
   return (
     <Screen testID="discuss-screen">
       <Kicker>ROUND {state.round} · DISCUSS</Kicker>
@@ -74,6 +84,7 @@ export function DiscussScreen({ state, dispatch }: ScreenProps) {
       <Body>Talk it over. Accuse, defend, bluff. Vote when the table is ready.</Body>
       <Note>{state.speakingOrder.length} players still in</Note>
       <Button testID="discuss-vote" label="Go to the vote" onPress={() => dispatch({ type: 'OPEN_VOTE' })} />
+      <SomeoneLeft onPress={onSomeoneLeft} />
     </Screen>
   );
 }

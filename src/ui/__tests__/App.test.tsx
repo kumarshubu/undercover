@@ -73,8 +73,9 @@ describe('app', () => {
     deal();
     playToEnd();
 
-    // Two games in, somebody has points on the board.
-    expect(screen.getAllByText(/\d+ pts/).some((t) => t.props.children[0] > 0)).toBe(true);
+    // Somebody won points in this game.
+    const earned = screen.getAllByText(/^\+\d+ pts$/).map((t) => Number(t.props.children[1]));
+    expect(earned.some((n) => n > 0)).toBe(true);
 
     settle();
     press('gameover-setup');

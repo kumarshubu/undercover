@@ -74,7 +74,32 @@ export function Button({
   );
 }
 
+/** A quiet link for rarely-needed actions, so it never competes with the main button. */
+export function TextButton({
+  testID,
+  label,
+  onPress,
+}: {
+  testID: string;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      hitSlop={12}
+      style={({ pressed }) => [s.textButton, pressed && s.pressed]}
+    >
+      <Text style={s.textButtonText}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const s = StyleSheet.create({
+  textButton: { paddingVertical: space(1), marginTop: space(1) },
+  textButtonText: { ...type.label, color: c.inkFaint, textDecorationLine: 'underline' },
   screen: {
     flexGrow: 1,
     backgroundColor: c.bg,

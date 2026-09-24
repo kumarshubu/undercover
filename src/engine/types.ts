@@ -80,7 +80,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mrWhiteNeverFirst: true,
   starterMode: 'rotate',
   votingMode: 'groupTap',
-  allowSelfVote: true,
+  allowSelfVote: false,
   allowAbstain: false,
   scoreSurvivorsOnly: false,
 };
@@ -119,6 +119,8 @@ export interface GameState {
 
   winner: Winner | null;
   scores: Record<string, number>;
+  /** `scores` as this game began, so the points won in this game alone are known. */
+  scoresAtStart: Record<string, number>;
 
   /** Seeded RNG state lives INSIDE the state so `reduce` is genuinely pure. */
   seed: number;

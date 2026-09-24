@@ -19,17 +19,31 @@ const dealt = (seed: number, n = 5, u = 1, w = 1): GameState =>
 
 const setup = (initial: GameState, deadZoneMs = 0) => {
   const onNewSetup = jest.fn();
+  const onGameOver = jest.fn();
   let seed = 1000;
   const view = render(
     <Game
       initial={initial}
-      pair={PAIR}
+      nextPair={() => PAIR}
       onNewSetup={onNewSetup}
+      onGameOver={onGameOver}
       nextSeed={() => seed++}
       deadZoneMs={deadZoneMs}
     />,
   );
-  return { onNewSetup, unmount: view.unmount };
+  /** Same game, new onGameOver identity — what a parent re-render does. */
+  const rerenderWith = (cb: (r: unknown) => void) =>
+    view.rerender(
+      <Game
+        initial={initial}
+        nextPair={() => PAIR}
+        onNewSetup={onNewSetup}
+        onGameOver={cb as never}
+        nextSeed={() => seed++}
+        deadZoneMs={deadZoneMs}
+      />,
+    );
+  return { onNewSetup, onGameOver, rerenderWith, unmount: view.unmount };
 };
 
 const press = (id: string) => fireEvent.press(screen.getByTestId(id));
@@ -121,7 +135,7 @@ describe('game — Mr White', () => {
 
     expect(screen.getByTestId('gameover-winner').props.children).toBe('Mr White wins');
     expect(screen.getByTestId(`gameover-${mw.id}`)).toBeTruthy();
-    expect(screen.getByText('6 pts')).toBeTruthy();
+    expect(screen.getByText('+6 pts')).toBeTruthy();
   });
 
   it('GU5 a wrong guess is shown, the word is not, and counting it takes two taps', () => {
@@ -252,5 +266,39 @@ describe('game — privacy and the end', () => {
     const { onNewSetup } = playOut(5, () => {});
     press('gameover-setup');
     expect(onNewSetup).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('game — results for the leaderboard', () => {
+  it('GU11 BLOCKER — each finished game is reported once, with only its own points', () => {
+    const s = dealt(3);
+    const { onGameOver, rerenderWith } = setup(s);
+    // Mr White out with a wrong guess, then the undercover: civilians win.
+    talkThrough(s);
+    press(`vote-${withRole(s, 'mrwhite').id}`);
+    press('vote-confirm');
+    press('elimination-continue');
+    fireEvent.changeText(screen.getByTestId('guess-input'), 'latte');
+    press('guess-submit');
+    press('guess-continue');
+    talkThrough({ ...s, speakingOrder: s.speakingOrder.filter((id) => id !== withRole(s, 'mrwhite').id) });
+    press(`vote-${withRole(s, 'undercover').id}`);
+    press('vote-confirm');
+    press('elimination-continue');
+
+    expect(on('gameover-screen')).toBe(true);
+    expect(onGameOver).toHaveBeenCalledTimes(1);
+    const first = onGameOver.mock.calls[0][0] as Array<{ name: string; points: number; won: boolean }>;
+    for (const r of first) {
+      const role = s.players.find((p) => p.name === r.name)!.role;
+      expect(r.points).toBe(role === 'civilian' ? 2 : 0);
+      expect(r.won).toBe(role === 'civilian');
+    }
+
+    // Re-rendering the finished game — even with a new callback, as a parent
+    // re-render gives it — must not report it again.
+    rerenderWith((r) => onGameOver(r));
+    press('gameover-setup');
+    expect(onGameOver).toHaveBeenCalledTimes(1);
   });
 });

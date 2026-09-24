@@ -9,11 +9,45 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { alivePlayers } from '../engine/engine';
+import type { Player } from '../engine/types';
 import { Body, Button, Kicker, Screen, Title } from './parts';
-import { nameOf, type ScreenProps } from './RoundScreens';
+import { SomeoneLeft, nameOf, type ScreenProps } from './RoundScreens';
 import { c, radius, space, type } from './theme';
 
-export function VoteScreen({ state, dispatch }: ScreenProps) {
+/** Tap a name to pick it, tap again to un-pick. */
+export function CandidateList({
+  candidates,
+  picked,
+  onPick,
+  testIDPrefix,
+}: {
+  candidates: readonly Player[];
+  picked: string | null;
+  onPick: (id: string | null) => void;
+  testIDPrefix: string;
+}) {
+  return (
+    <View style={s.list}>
+      {candidates.map((p) => {
+        const selected = p.id === picked;
+        return (
+          <Pressable
+            key={p.id}
+            testID={`${testIDPrefix}-${p.id}`}
+            onPress={() => onPick(selected ? null : p.id)}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            style={({ pressed }) => [s.row, selected && s.rowPicked, pressed && s.pressed]}
+          >
+            <Text style={[s.rowText, selected && s.rowTextPicked]}>{p.name}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+export function VoteScreen({ state, dispatch, onSomeoneLeft }: ScreenProps) {
   const [picked, setPicked] = useState<string | null>(null);
 
   // During a revote only the tied players can be picked — the engine refuses
@@ -28,23 +62,12 @@ export function VoteScreen({ state, dispatch }: ScreenProps) {
       <Title>Who's out?</Title>
       <Body>Agree as a table, then pick that player.</Body>
 
-      <View style={s.list}>
-        {candidates.map((p) => {
-          const selected = p.id === picked;
-          return (
-            <Pressable
-              key={p.id}
-              testID={`vote-${p.id}`}
-              onPress={() => setPicked(selected ? null : p.id)}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              style={({ pressed }) => [s.row, selected && s.rowPicked, pressed && s.pressed]}
-            >
-              <Text style={[s.rowText, selected && s.rowTextPicked]}>{p.name}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <CandidateList
+        candidates={candidates}
+        picked={picked}
+        onPick={setPicked}
+        testIDPrefix="vote"
+      />
 
       <Button
         testID="vote-confirm"
@@ -54,6 +77,7 @@ export function VoteScreen({ state, dispatch }: ScreenProps) {
           if (picked) dispatch({ type: 'TAP_ELIMINATE', candidateId: picked });
         }}
       />
+      <SomeoneLeft onPress={onSomeoneLeft} />
     </Screen>
   );
 }

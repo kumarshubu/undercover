@@ -212,6 +212,7 @@ function startGame(
     nextEliminationOrder: 1,
     winner: null,
     scores,
+    scoresAtStart: scores,
     seed: rng.seed,
   };
 }
@@ -377,7 +378,10 @@ export function reduce(s: GameState, action: GameAction): GameState {
     }
 
     case 'ABSTAIN': {
-      if (!s.settings.allowAbstain) return s;
+      // After two rounds in a row with nobody out, skipping is withdrawn — the
+      // same limit the tie screen has — so a table that keeps skipping can't
+      // stall the game forever.
+      if (!s.settings.allowAbstain || s.noEliminationStreak >= 2) return s;
       const ballots = { ...s.ballots };
       delete ballots[action.voterId];
       return { ...s, ballots };
@@ -400,6 +404,7 @@ export function reduce(s: GameState, action: GameAction): GameState {
       // Every ballot abstained. Without this branch the phase never changes and
       // the screen deadlocks with no button — the softlock the gap review found.
       if (top.length === 0) {
+        if (s.noEliminationStreak >= 2) return s; //  a third empty round is refused
         const streak = s.noEliminationStreak + 1;
         return beginRound({
           ...s,

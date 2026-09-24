@@ -116,6 +116,64 @@ describe('setup — starting', () => {
     const onStart = jest.fn();
     setup(onStart, { n: 7, u: 2, w: 1 });
     fireEvent.press(screen.getByTestId('setup-start'));
-    expect(onStart).toHaveBeenCalledWith({ n: 7, u: 2, w: 1 });
+    expect(onStart).toHaveBeenCalledWith(
+      { n: 7, u: 2, w: 1 },
+      ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7'],
+    );
+  });
+});
+
+describe('setup — names', () => {
+  const nameAt = (i: number) => screen.getByTestId(`setup-name-${i}`).props.value;
+  const startEnabled = () =>
+    !screen.getByTestId('setup-start').props.accessibilityState?.disabled;
+
+  it('SN1 one name per seat: saved names first, then "Player N"', () => {
+    render(
+      <SetupScreen
+        settings={DEFAULT_SETTINGS}
+        onStart={jest.fn()}
+        initial={{ n: 5, u: 1, w: 1 }}
+        names={['Ankit', 'Rajiv', 'Ken']}
+      />,
+    );
+    expect([0, 1, 2, 3, 4].map(nameAt)).toEqual(['Ankit', 'Rajiv', 'Ken', 'Player 4', 'Player 5']);
+    expect(screen.queryByTestId('setup-name-5')).toBeNull();
+  });
+
+  it('SN2 shrinking the table and growing it back keeps the names typed', () => {
+    render(<SetupScreen settings={DEFAULT_SETTINGS} onStart={jest.fn()} initial={{ n: 5, u: 1, w: 1 }} />);
+    fireEvent.changeText(screen.getByTestId('setup-name-4'), 'Karan');
+    fireEvent(screen.getByTestId('setup-slider'), 'valueChange', 3);
+    expect(screen.queryByTestId('setup-name-4')).toBeNull();
+    fireEvent(screen.getByTestId('setup-slider'), 'valueChange', 6);
+    expect(nameAt(4)).toBe('Karan');
+    expect(nameAt(5)).toBe('Player 6');
+  });
+
+  it('SN3 a blank or repeated name blocks Start and says why', () => {
+    render(<SetupScreen settings={DEFAULT_SETTINGS} onStart={jest.fn()} names={['Ankit', 'Rajiv']} />);
+    expect(startEnabled()).toBe(true);
+    expect(screen.queryByTestId('setup-name-problem')).toBeNull();
+
+    fireEvent.changeText(screen.getByTestId('setup-name-1'), '   ');
+    expect(startEnabled()).toBe(false);
+    expect(screen.getByText('Every player needs a name.')).toBeTruthy();
+
+    fireEvent.changeText(screen.getByTestId('setup-name-1'), 'ANKIT');
+    expect(startEnabled()).toBe(false);
+    expect(screen.getByText('Two players are called “ANKIT”.')).toBeTruthy();
+
+    fireEvent.changeText(screen.getByTestId('setup-name-1'), 'Rajiv');
+    expect(startEnabled()).toBe(true);
+  });
+
+  it('SN4 Start hands over the names as typed, trimmed, in seat order', () => {
+    const onStart = jest.fn();
+    render(<SetupScreen settings={DEFAULT_SETTINGS} onStart={onStart} initial={{ n: 3, u: 1, w: 0 }} />);
+    fireEvent.changeText(screen.getByTestId('setup-name-0'), '  Asha ');
+    fireEvent.changeText(screen.getByTestId('setup-name-2'), 'Chen');
+    fireEvent.press(screen.getByTestId('setup-start'));
+    expect(onStart).toHaveBeenCalledWith({ n: 3, u: 1, w: 0 }, ['Asha', 'Player 2', 'Chen']);
   });
 });

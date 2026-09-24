@@ -14,6 +14,15 @@ const RNG = 'src/engine/rng.ts';
 const GAME_UI = 'src/ui/Game.tsx';
 const OUTCOME_UI = 'src/ui/OutcomeScreens.tsx';
 const VOTE_UI = 'src/ui/VoteScreen.tsx';
+const WORDLIST = 'src/engine/wordlist.ts';
+const SETTINGS_UI = 'src/ui/SettingsScreen.tsx';
+const APP = 'App.tsx';
+const LEADERBOARD = 'src/engine/leaderboard.ts';
+const SETUP = 'src/engine/setup.ts';
+const LEADERBOARD_UI = 'src/ui/LeaderboardScreen.tsx';
+const BALLOT_UI = 'src/ui/BallotScreens.tsx';
+const LEAVE_UI = 'src/ui/LeaveSheet.tsx';
+const TYPES = 'src/engine/types.ts';
 
 // Both runners write the same report shape: testResults[].assertionResults[].
 const REPORT = '/tmp/mut.json';
@@ -55,6 +64,7 @@ const MUTATIONS = [
     name: 'drop the empty-tally transition (softlock)',
     file: ENGINE,
     from: `      if (top.length === 0) {
+        if (s.noEliminationStreak >= 2) return s; //  a third empty round is refused
         const streak = s.noEliminationStreak + 1;
         return beginRound({
           ...s,
@@ -207,8 +217,191 @@ const MUTATIONS = [
     to: `  const candidates = state.players.filter(`,
     mustFail: 'GU3',
   },
+  {
+    name: 'accept a pair whose two words are the same',
+    file: WORDLIST,
+    from: `    if (normalizeGuess(a) === normalizeGuess(b)) {`,
+    to: `    if (false) {`,
+    mustFail: 'L6',
+  },
+  {
+    name: 'stop skipping recently played pairs',
+    file: WORDLIST,
+    from: `  let pool = pairs.filter((p) => !recent.some((r) => samePair(r, p)));`,
+    to: `  let pool: WordPair[] = [...pairs];`,
+    mustFail: 'B4',
+  },
+  {
+    name: 'stop skipping recently played pairs (unit)',
+    file: WORDLIST,
+    from: `  let pool = pairs.filter((p) => !recent.some((r) => samePair(r, p)));`,
+    to: `  let pool: WordPair[] = [...pairs];`,
+    mustFail: 'L7',
+  },
+  {
+    name: 'count the running total as this game\'s points',
+    file: LEADERBOARD,
+    from: `    const points = (s.scores[p.id] ?? 0) - (s.scoresAtStart[p.id] ?? 0);`,
+    to: `    const points = s.scores[p.id] ?? 0;`,
+    mustFail: 'P1',
+  },
+  {
+    name: 'track players by exact spelling instead of by name',
+    file: LEADERBOARD,
+    from: `    const key = nameKey(r.name);`,
+    to: `    const key = r.name;`,
+    mustFail: 'P3',
+  },
+  {
+    name: 'allow two players with one name',
+    file: SETUP,
+    from: `    if (seen.has(key)) return \`Two players are called “\${name}”.\`;`,
+    to: ``,
+    mustFail: 'N1',
+  },
+  {
+    name: 'allow two players with one name (screen)',
+    runner: 'ui',
+    file: SETUP,
+    from: `    if (seen.has(key)) return \`Two players are called “\${name}”.\`;`,
+    to: ``,
+    mustFail: 'SN3',
+  },
+  {
+    name: 'report a finished game again on re-render',
+    runner: 'ui',
+    file: GAME_UI,
+    from: `    if (state.phase === 'gameOver' && recorded.current !== state) {`,
+    to: `    if (state.phase === 'gameOver') {`,
+    mustFail: 'GU11',
+  },
+  {
+    name: 'wipe the leaderboard on a double-tap',
+    runner: 'ui',
+    file: LEADERBOARD_UI,
+    from: `    if (Date.now() < armedAt.current) return; //   a double-tap is not a decision`,
+    to: ``,
+    mustFail: 'LB3',
+  },
+  {
+    name: 'never save the leaderboard',
+    runner: 'ui',
+    file: APP,
+    from: `    if (board !== loadedBoard.current) saveLeaderboard(board);`,
+    to: ``,
+    mustFail: 'AP3',
+  },
+  {
+    name: 'deal the default names instead of the typed ones',
+    runner: 'ui',
+    file: APP,
+    from: `    setGame(newGame(counts, names, nextPair(), randomSeed(), settings));`,
+    to: `    setGame(newGame(counts, NAMES.slice(0, counts.n), nextPair(), randomSeed(), settings));`,
+    mustFail: 'AP2',
+  },
+  {
+    name: 'show a word from the list in settings',
+    runner: 'ui',
+    file: SETTINGS_UI,
+    from: `          {wordList ? wordList.name : 'Built-in words'}`,
+    to: `          {wordList ? \`\${wordList.name} (\${wordList.pairs[0].civilianWord})\` : 'Built-in words'}`,
+    mustFail: 'ST3',
+  },
+  {
+    name: 'ignore the uploaded list and deal the built-in pair',
+    runner: 'ui',
+    file: APP,
+    from: `  const pairs = wordList?.pairs ?? BUILT_IN_PAIRS;`,
+    to: `  const pairs = BUILT_IN_PAIRS;`,
+    mustFail: 'AW2',
+  },
+  {
+    name: 'let the table skip the vote forever',
+    file: ENGINE,
+    from: `      if (!s.settings.allowAbstain || s.noEliminationStreak >= 2) return s;`,
+    to: `      if (!s.settings.allowAbstain) return s;`,
+    mustFail: 'T8',
+  },
+  {
+    name: 'close an empty vote into a third empty round',
+    file: ENGINE,
+    from: `        if (s.noEliminationStreak >= 2) return s; //  a third empty round is refused`,
+    to: ``,
+    mustFail: 'T8',
+  },
+  {
+    name: "leave the last voter's pick on the next ballot",
+    runner: 'ui',
+    file: BALLOT_UI,
+    from: `    setOpen(false);
+    setPicked(null);`,
+    to: `    setOpen(false);`,
+    mustFail: 'BS2',
+  },
+  {
+    name: 'open the next ballot on a double-tap',
+    runner: 'ui',
+    file: BALLOT_UI,
+    from: `            if (Date.now() - shownAt.current >= deadZoneMs) setOpen(true);`,
+    to: `            setOpen(true);`,
+    mustFail: 'BS6',
+  },
+  {
+    name: 'offer everyone in a revote',
+    runner: 'ui',
+    file: BALLOT_UI,
+    from: `      (state.tiedCandidateIds.length === 0 || state.tiedCandidateIds.includes(p.id)) &&`,
+    to: `      true &&`,
+    mustFail: 'BS3',
+  },
+  {
+    name: 'keep offering "skip" after two empty rounds',
+    runner: 'ui',
+    file: BALLOT_UI,
+    from: `  const canSkip = state.settings.allowAbstain && state.noEliminationStreak < 2;`,
+    to: `  const canSkip = state.settings.allowAbstain;`,
+    mustFail: 'BS5',
+  },
+  {
+    name: 'remove a player on the first tap',
+    runner: 'ui',
+    file: LEAVE_UI,
+    from: `      <CandidateList candidates={living} picked={picked} onPick={setPicked} testIDPrefix="leave" />`,
+    to: `      <CandidateList candidates={living} picked={picked} onPick={(id) => id && onLeave(id)} testIDPrefix="leave" />`,
+    mustFail: 'LS1',
+  },
+  {
+    name: 'hide why a walkout game paid nobody',
+    runner: 'ui',
+    file: OUTCOME_UI,
+    from: `  const walkout = lastOut?.eliminationCause === 'removed';`,
+    to: `  const walkout = false;`,
+    mustFail: 'LS3',
+  },
+  {
+    name: 'ignore the voting choice from Settings',
+    runner: 'ui',
+    file: APP,
+    from: `    setGame(newGame(counts, names, nextPair(), randomSeed(), settings));`,
+    to: `    setGame(newGame(counts, names, nextPair(), randomSeed()));`,
+    mustFail: 'AP6',
+  },
+  {
+    name: 'let players vote for themselves by default',
+    file: TYPES,
+    from: `  allowSelfVote: false,`,
+    to: `  allowSelfVote: true,`,
+    mustFail: 'T6b',
+  },
+  {
+    name: "list the voter on their own ballot",
+    runner: 'ui',
+    file: BALLOT_UI,
+    from: `      (state.settings.allowSelfVote || p.id !== current.id),`,
+    to: `      true,`,
+    mustFail: 'BS7',
+  },
 ];
-
 const originals = new Map();
 for (const f of new Set(MUTATIONS.map((m) => m.file))) {
   originals.set(f, readFileSync(f, 'utf8'));
