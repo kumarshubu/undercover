@@ -12,6 +12,7 @@ import {
   type EliminationCause,
   type GameAction,
   type GameState,
+  type Phase,
   type Player,
   type Role,
   type Settings,
@@ -286,9 +287,55 @@ export function tallyBallots(s: GameState): { top: string[]; counts: Record<stri
   return { top: Object.keys(counts).filter((id) => counts[id] === max), counts };
 }
 
+/**
+ * A vote may only land on a living player — and, during a revote, only on one
+ * of the tied. Without this a stale tap could "eliminate" someone already out.
+ */
+function isEligibleCandidate(s: GameState, id: string): boolean {
+  const p = s.players.find((x) => x.id === id);
+  if (!p || !isAlive(p)) return false;
+  return s.tiedCandidateIds.length === 0 || s.tiedCandidateIds.includes(id);
+}
+
 // ---------------------------------------------------------------- reducer
 
+/**
+ * The phases each action is legal in. Anything else is a no-op, so a stray tap
+ * from a screen that is mid-transition cannot move the game. Before this, an
+ * override fired after game over re-ran the award and paid Mr White twice.
+ */
+const ACTION_PHASES: Record<Exclude<GameAction['type'], 'START'>, readonly Phase[]> = {
+  REVEAL_NEXT: ['deal'],
+  DEAL_DONE: ['deal'],
+  BEGIN_ROUND: ['starterAnnounce'],
+  NEXT_SPEAKER: ['description'],
+  OPEN_VOTE: ['description', 'discussion'],
+  CAST_BALLOT: ['voteCast'],
+  ABSTAIN: ['voteCast'],
+  CLOSE_VOTING: ['voteCast'],
+  TAP_ELIMINATE: ['votePick'],
+  RESOLVE_TIE: ['voteTie'],
+  CONTINUE: ['eliminationReveal', 'mrWhiteGuessResult'],
+  SUBMIT_GUESS: ['mrWhiteGuess'],
+  OVERRIDE_GUESS: ['mrWhiteGuessResult'],
+  REMOVE_PLAYER: [
+    'deal',
+    'starterAnnounce',
+    'description',
+    'discussion',
+    'votePick',
+    'voteCast',
+    'voteTie',
+    'eliminationReveal',
+    'mrWhiteGuess',
+    'mrWhiteGuessResult',
+  ],
+  PLAY_AGAIN: ['gameOver'],
+};
+
 export function reduce(s: GameState, action: GameAction): GameState {
+  if (action.type !== 'START' && !ACTION_PHASES[action.type].includes(s.phase)) return s;
+
   switch (action.type) {
     case 'START':
       return startGame(
@@ -323,6 +370,8 @@ export function reduce(s: GameState, action: GameAction): GameState {
       };
 
     case 'CAST_BALLOT': {
+      const voter = s.players.find((p) => p.id === action.voterId);
+      if (!voter || !isAlive(voter) || !isEligibleCandidate(s, action.candidateId)) return s;
       if (!s.settings.allowSelfVote && action.voterId === action.candidateId) return s;
       return { ...s, ballots: { ...s.ballots, [action.voterId]: action.candidateId } };
     }
@@ -335,6 +384,7 @@ export function reduce(s: GameState, action: GameAction): GameState {
     }
 
     case 'TAP_ELIMINATE': {
+      if (!isEligibleCandidate(s, action.candidateId)) return s;
       const next = applyElimination(s, action.candidateId, 'vote');
       return {
         ...next,
@@ -460,6 +510,29 @@ export function reduce(s: GameState, action: GameAction): GameState {
         };
       }
 
+      // The speaker on turn was last in the order and walked out. Nobody is
+      // left to speak this round, so move on rather than point past the end.
+      if (next.phase === 'description' && next.turnIndex >= next.speakingOrder.length) {
+        next = {
+          ...next,
+          phase: 'discussion',
+          turnIndex: Math.max(0, next.speakingOrder.length - 1),
+        };
+      }
+
+      // The leaver's ballot, and every ballot cast for them, go with them.
+      // Left in, a stale vote could put them out a second time — and hand a
+      // departed Mr White the guess that M4 says they never get.
+      next = {
+        ...next,
+        ballots: Object.fromEntries(
+          Object.entries(next.ballots).filter(
+            ([voter, candidate]) => voter !== action.playerId && candidate !== action.playerId,
+          ),
+        ),
+        tiedCandidateIds: next.tiedCandidateIds.filter((id) => id !== action.playerId),
+      };
+
       // A player walking out must not hand anyone a scored victory.
       const winner = checkWin(next);
       if (winner) return { ...next, phase: 'gameOver', winner };
@@ -537,6 +610,38 @@ export function checkInvariants(s: GameState): string[] {
   for (const p of s.players) {
     if (p.guess && p.eliminationCause !== 'vote') bad.push(`I11 guess without vote ${p.id}`);
     if (p.guess && p.role !== 'mrwhite') bad.push(`I11 guess by non-mrwhite ${p.id}`);
+  }
+
+  // I12: everyone who is out holds one place in the elimination order, 1..k
+  // with no gaps. Without this a player can be put out twice — first by walking
+  // out, then by a stale vote — and every other invariant still passes.
+  const out = s.players.filter((p) => !isAlive(p));
+  const outOrders = out.map((p) => p.eliminationOrder ?? 0).sort((a, b) => a - b);
+  if (outOrders.some((o, i) => o !== i + 1) || s.nextEliminationOrder !== out.length + 1) {
+    bad.push('I12 elimination order is not 1..k');
+  }
+  for (const p of s.players) {
+    if (isAlive(p) && (p.eliminationOrder !== null || p.eliminationCause !== null)) {
+      bad.push(`I12 living player marked out ${p.id}`);
+    }
+    if (p.status === 'left' && p.eliminationCause !== 'removed') bad.push(`I12 left without removal ${p.id}`);
+    if (p.status === 'eliminated' && p.eliminationCause !== 'vote') bad.push(`I12 eliminated without vote ${p.id}`);
+  }
+
+  // I13: while players are describing, someone is actually on turn.
+  if (s.phase === 'description' && (s.turnIndex < 0 || s.turnIndex >= s.speakingOrder.length)) {
+    bad.push('I13 no speaker on turn');
+  }
+
+  // I14: while a vote is open, every ballot and every tied candidate is alive.
+  if (s.phase === 'votePick' || s.phase === 'voteCast' || s.phase === 'voteTie') {
+    const living = new Set(alivePlayers(s).map((p) => p.id));
+    for (const [voter, candidate] of Object.entries(s.ballots)) {
+      if (!living.has(voter) || !living.has(candidate)) bad.push(`I14 ballot ${voter}->${candidate}`);
+    }
+    for (const id of s.tiedCandidateIds) {
+      if (!living.has(id)) bad.push(`I14 tied candidate is out ${id}`);
+    }
   }
 
   return bad;

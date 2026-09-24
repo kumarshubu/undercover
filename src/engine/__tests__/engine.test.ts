@@ -24,7 +24,14 @@ import {
   isValidSetup,
   maxInfiltrators,
 } from '../setup';
-import { DEFAULT_SETTINGS, type GameState, type Player, type Settings } from '../types';
+import {
+  DEFAULT_SETTINGS,
+  type GameAction,
+  type GameState,
+  type Phase,
+  type Player,
+  type Settings,
+} from '../types';
 
 const PAIR = { civilianWord: 'Coffee', undercoverWord: 'Tea' };
 const names = (n: number) => Array.from({ length: n }, (_, i) => `P${i}`);
@@ -242,7 +249,10 @@ describe('W — win conditions', () => {
 // ------------------------------------------------------------------ Mr White
 
 describe('M — Mr White', () => {
-  const base = () => stateWith(['civilian', 'civilian', 'civilian', 'undercover', 'mrwhite']);
+  const base = (): GameState => ({
+    ...stateWith(['civilian', 'civilian', 'civilian', 'undercover', 'mrwhite']),
+    phase: 'votePick',
+  });
 
   it('M1 a voted-out Mr White is offered a guess', () => {
     const s = reduce(base(), { type: 'TAP_ELIMINATE', candidateId: 'p4' });
@@ -315,6 +325,37 @@ describe('M — Mr White', () => {
     expect(s.players.find((p) => p.id === 'p4')!.guess!.correct).toBe(true);
     expect(s.scores['p4']).toBe(6);
   });
+
+  it('M9 BLOCKER — once the game is over, overriding the guess changes nothing', () => {
+    // Without a phase guard an override after a correct guess re-ran the award
+    // (6 -> 12 -> 18), and flipping it to wrong let Mr White keep 6 points
+    // while the civilians were paid for the same game.
+    let s = kill(base(), ['p3']);
+    s = reduce(s, { type: 'TAP_ELIMINATE', candidateId: 'p4' });
+    s = reduce(s, { type: 'CONTINUE' });
+    s = reduce(s, { type: 'SUBMIT_GUESS', text: s.civilianWord });
+    expect(s.phase).toBe('gameOver');
+    expect(s.scores).toEqual({ p4: 6 });
+
+    expect(reduce(s, { type: 'OVERRIDE_GUESS', correct: true })).toEqual(s);
+    expect(reduce(s, { type: 'OVERRIDE_GUESS', correct: false })).toEqual(s);
+  });
+
+  it('M10 BLOCKER — a Mr White who walks out mid-vote cannot be voted out, so gets no guess', () => {
+    let s: GameState = {
+      ...base(),
+      phase: 'voteCast',
+      settings: { ...base().settings, votingMode: 'secretBallot' },
+    };
+    s = reduce(s, { type: 'CAST_BALLOT', voterId: 'p0', candidateId: 'p4' });
+    s = reduce(s, { type: 'CAST_BALLOT', voterId: 'p1', candidateId: 'p4' });
+    s = reduce(s, { type: 'REMOVE_PLAYER', playerId: 'p4' });
+    s = reduce(s, { type: 'CLOSE_VOTING' });
+
+    expect(s.players.find((p) => p.id === 'p4')!.status).toBe('left');
+    expect(s.phase).not.toBe('eliminationReveal');
+    expect(reduce(s, { type: 'CONTINUE' }).phase).not.toBe('mrWhiteGuess');
+  });
 });
 
 // ------------------------------------------------------------------ order
@@ -351,6 +392,46 @@ describe('O — turn order', () => {
     expect(s.phase).toBe('gameOver');
     expect(Object.keys(s.scores)).toHaveLength(0); // ended, not won
   });
+
+  it('O6 BLOCKER — if the speaker on turn walks out, the turn never points past the end', () => {
+    const roles = ['civilian', 'civilian', 'civilian', 'undercover', 'mrwhite'] as const;
+
+    // Mid-order: the next player in line inherits the turn.
+    let s: GameState = { ...stateWith([...roles]), turnIndex: 2 };
+    s = reduce(s, { type: 'REMOVE_PLAYER', playerId: 'p2' });
+    expect(s.phase).toBe('description');
+    expect(s.speakingOrder[s.turnIndex]).toBe('p3');
+
+    // Last in order: nobody is left to speak this round, so it moves on.
+    let t: GameState = { ...stateWith([...roles]), turnIndex: 4 };
+    t = reduce(t, { type: 'REMOVE_PLAYER', playerId: 'p4' });
+    expect(t.phase).toBe('discussion');
+    expect(t.speakingOrder[t.turnIndex]).toBeDefined();
+  });
+
+  it("O7 a walkout takes the leaver's ballot, and every ballot cast for them, with it", () => {
+    const roles = ['civilian', 'civilian', 'civilian', 'undercover', 'mrwhite'] as const;
+    const secret = (s: GameState): GameState => ({
+      ...s,
+      settings: { ...s.settings, votingMode: 'secretBallot' },
+    });
+
+    let s: GameState = { ...secret(stateWith([...roles])), phase: 'voteCast' };
+    s = reduce(s, { type: 'CAST_BALLOT', voterId: 'p0', candidateId: 'p3' });
+    s = reduce(s, { type: 'CAST_BALLOT', voterId: 'p1', candidateId: 'p3' });
+    s = reduce(s, { type: 'CAST_BALLOT', voterId: 'p2', candidateId: 'p1' });
+    s = reduce(s, { type: 'CAST_BALLOT', voterId: 'p3', candidateId: 'p1' });
+    s = reduce(s, { type: 'REMOVE_PLAYER', playerId: 'p1' });
+    expect(s.ballots).toEqual({ p0: 'p3' });
+
+    // A tie loses them too.
+    const tie: GameState = {
+      ...secret(stateWith([...roles])),
+      phase: 'voteTie',
+      tiedCandidateIds: ['p3', 'p4'],
+    };
+    expect(reduce(tie, { type: 'REMOVE_PLAYER', playerId: 'p4' }).tiedCandidateIds).toEqual(['p3']);
+  });
 });
 
 // ------------------------------------------------------------------ voting
@@ -358,7 +439,7 @@ describe('O — turn order', () => {
 describe('T — voting', () => {
   const base = (): GameState => {
     const s = stateWith(['civilian', 'civilian', 'civilian', 'undercover', 'mrwhite']);
-    return { ...s, settings: { ...s.settings, votingMode: 'secretBallot' } };
+    return { ...s, phase: 'voteCast', settings: { ...s.settings, votingMode: 'secretBallot' } };
   };
 
   it('T1 plurality is ousted', () => {
@@ -421,6 +502,131 @@ describe('T — voting', () => {
   });
 });
 
+// ------------------------------------------------------------------ guards
+
+const ALL_PHASES: readonly Phase[] = [
+  'setup',
+  'deal',
+  'starterAnnounce',
+  'description',
+  'discussion',
+  'votePick',
+  'voteCast',
+  'voteTie',
+  'eliminationReveal',
+  'mrWhiteGuess',
+  'mrWhiteGuessResult',
+  'gameOver',
+];
+
+describe('A — action guards', () => {
+  /** Where each action is legal. Everywhere else it must be a no-op. */
+  const LEGAL: Record<Exclude<GameAction['type'], 'START'>, readonly Phase[]> = {
+    REVEAL_NEXT: ['deal'],
+    DEAL_DONE: ['deal'],
+    BEGIN_ROUND: ['starterAnnounce'],
+    NEXT_SPEAKER: ['description'],
+    OPEN_VOTE: ['description', 'discussion'],
+    CAST_BALLOT: ['voteCast'],
+    ABSTAIN: ['voteCast'],
+    CLOSE_VOTING: ['voteCast'],
+    TAP_ELIMINATE: ['votePick'],
+    RESOLVE_TIE: ['voteTie'],
+    CONTINUE: ['eliminationReveal', 'mrWhiteGuessResult'],
+    SUBMIT_GUESS: ['mrWhiteGuess'],
+    OVERRIDE_GUESS: ['mrWhiteGuessResult'],
+    REMOVE_PLAYER: ALL_PHASES.filter((p) => p !== 'setup' && p !== 'gameOver'),
+    PLAY_AGAIN: ['gameOver'],
+  };
+
+  /** A state in which every action below would do something, were it allowed. */
+  const rich = (phase: Phase): GameState => {
+    const s = stateWith(['civilian', 'civilian', 'civilian', 'undercover', 'mrwhite']);
+    return {
+      ...s,
+      phase,
+      settings: { ...s.settings, allowAbstain: true },
+      players: s.players.map((p) =>
+        p.id === 'p4'
+          ? {
+              ...p,
+              status: 'eliminated',
+              eliminatedRound: 1,
+              eliminationCause: 'vote',
+              eliminationOrder: 1,
+              guess: { text: 'latte', correct: false },
+            }
+          : p,
+      ),
+      nextEliminationOrder: 2,
+      pendingEliminationId: 'p4',
+      speakingOrder: ['p0', 'p1', 'p2', 'p3'],
+      ballots: { p0: 'p3' },
+      tiedCandidateIds: ['p0', 'p3'],
+    };
+  };
+
+  const ACTIONS: Array<Exclude<GameAction, { type: 'START' }>> = [
+    { type: 'REVEAL_NEXT' },
+    { type: 'DEAL_DONE' },
+    { type: 'BEGIN_ROUND' },
+    { type: 'NEXT_SPEAKER' },
+    { type: 'OPEN_VOTE' },
+    { type: 'CAST_BALLOT', voterId: 'p1', candidateId: 'p3' },
+    { type: 'ABSTAIN', voterId: 'p0' },
+    { type: 'CLOSE_VOTING' },
+    { type: 'TAP_ELIMINATE', candidateId: 'p3' },
+    { type: 'RESOLVE_TIE', rule: 'random' },
+    { type: 'CONTINUE' },
+    { type: 'SUBMIT_GUESS', text: 'latte' },
+    { type: 'OVERRIDE_GUESS', correct: true },
+    { type: 'REMOVE_PLAYER', playerId: 'p1' },
+    { type: 'PLAY_AGAIN', pair: PAIR, seed: 9 },
+  ];
+
+  it('A1 BLOCKER — every action is a no-op outside the phases it belongs to', () => {
+    // A stray tap from a screen that is mid-transition must not move the game.
+    for (const action of ACTIONS) {
+      for (const phase of ALL_PHASES) {
+        const s = rich(phase);
+        const after = reduce(s, action);
+        if (LEGAL[action.type].includes(phase)) {
+          // Positive control: in its own phase the action really does act, so
+          // the refusals asserted below are not vacuous.
+          expect(after, `${action.type} in ${phase} should act`).not.toEqual(s);
+        } else {
+          expect(after, `${action.type} in ${phase} should be refused`).toEqual(s);
+        }
+      }
+    }
+  });
+
+  it('A2 a vote can only land on, or come from, a living player', () => {
+    const cast: GameState = { ...rich('voteCast'), tiedCandidateIds: [] };
+    expect(reduce(cast, { type: 'CAST_BALLOT', voterId: 'p0', candidateId: 'p4' })).toEqual(cast);
+    expect(reduce(cast, { type: 'CAST_BALLOT', voterId: 'p4', candidateId: 'p0' })).toEqual(cast);
+    expect(reduce(cast, { type: 'CAST_BALLOT', voterId: 'p0', candidateId: 'ghost' })).toEqual(cast);
+    const tap: GameState = { ...rich('votePick'), tiedCandidateIds: [] };
+    expect(reduce(tap, { type: 'TAP_ELIMINATE', candidateId: 'p4' })).toEqual(tap);
+
+    // Control: a living candidate is accepted.
+    expect(reduce(cast, { type: 'CAST_BALLOT', voterId: 'p1', candidateId: 'p2' }).ballots.p1).toBe(
+      'p2',
+    );
+    expect(reduce(tap, { type: 'TAP_ELIMINATE', candidateId: 'p2' }).phase).toBe(
+      'eliminationReveal',
+    );
+  });
+
+  it('A3 a revote only accepts the tied candidates', () => {
+    const s = rich('voteCast'); // tied: p0, p3
+    expect(reduce(s, { type: 'CAST_BALLOT', voterId: 'p1', candidateId: 'p2' })).toEqual(s);
+    expect(reduce(s, { type: 'CAST_BALLOT', voterId: 'p1', candidateId: 'p0' }).ballots.p1).toBe(
+      'p0',
+    );
+  });
+});
+
 // ------------------------------------------------------------------ whole game
 
 describe('G — whole game', () => {
@@ -476,6 +682,125 @@ describe('G — whole game', () => {
       played++;
     }
     expect(played).toBe(4000);
+  });
+
+  it('G3 fuzz — every setting, vote mode, tie rule, walkout and stray tap; points move only at game end', () => {
+    // G2 only ever plays group-tap votes. This one plays everything the engine
+    // accepts, and mixes in actions fired from the wrong screen at anyone,
+    // alive, out or made up.
+    const TIE_RULES = ['revote', 'random', 'noElimination'] as const;
+    let secret = 0;
+    let ties = 0;
+    let walkouts = 0;
+
+    for (let seed = 0; seed < 2000; seed++) {
+      const rng = makeRng(seed * 104729 + 1);
+      const r = () => rng.next();
+      const oneOf = <T,>(xs: readonly T[]): T => xs[Math.floor(r() * xs.length)];
+
+      const flag = r() < 0.3;
+      const settings: Settings = {
+        allowNonMajorityCivilians: flag,
+        mrWhiteNeverFirst: r() < 0.8,
+        starterMode: r() < 0.5 ? 'rotate' : 'randomEachRound',
+        votingMode: r() < 0.5 ? 'groupTap' : 'secretBallot',
+        allowSelfVote: r() < 0.5,
+        allowAbstain: r() < 0.5,
+        scoreSurvivorsOnly: r() < 0.5,
+      };
+      const n = 3 + Math.floor(r() * 18);
+      const counts = clampRoles(
+        { n, u: 1 + Math.floor((r() * n) / 2), w: Math.floor(r() * 3) },
+        flag,
+      );
+      let s = reduce(newGame(counts, names(n), PAIR, seed, settings), { type: 'DEAL_DONE' });
+      if (settings.votingMode === 'secretBallot') secret++;
+
+      const anyone = () => oneOf([...s.players.map((p) => p.id), 'ghost']);
+      const sensible = (): GameAction => {
+        const living = alivePlayers(s).map((p) => p.id);
+        const pool = s.tiedCandidateIds.length ? s.tiedCandidateIds : living;
+        switch (s.phase) {
+          case 'starterAnnounce':
+            return { type: 'BEGIN_ROUND' };
+          case 'description':
+            return { type: 'NEXT_SPEAKER' };
+          case 'discussion':
+            return { type: 'OPEN_VOTE' };
+          case 'votePick':
+            return { type: 'TAP_ELIMINATE', candidateId: oneOf(pool) };
+          case 'voteCast': {
+            if (r() < 1 / (living.length + 1)) return { type: 'CLOSE_VOTING' };
+            const voterId = oneOf(living);
+            return r() < 0.1
+              ? { type: 'ABSTAIN', voterId }
+              : { type: 'CAST_BALLOT', voterId, candidateId: oneOf(pool) };
+          }
+          case 'voteTie':
+            ties++;
+            return { type: 'RESOLVE_TIE', rule: oneOf(TIE_RULES) };
+          case 'mrWhiteGuess':
+            return { type: 'SUBMIT_GUESS', text: oneOf([s.civilianWord, s.undercoverWord, 'nope']) };
+          case 'mrWhiteGuessResult':
+            return r() < 0.2
+              ? { type: 'OVERRIDE_GUESS', correct: r() < 0.5 }
+              : { type: 'CONTINUE' };
+          default:
+            return { type: 'CONTINUE' };
+        }
+      };
+      const stray = (): GameAction =>
+        oneOf<() => GameAction>([
+          () => ({ type: 'REVEAL_NEXT' }),
+          () => ({ type: 'DEAL_DONE' }),
+          () => ({ type: 'BEGIN_ROUND' }),
+          () => ({ type: 'NEXT_SPEAKER' }),
+          () => ({ type: 'OPEN_VOTE' }),
+          () => ({ type: 'CLOSE_VOTING' }),
+          () => ({ type: 'CONTINUE' }),
+          () => ({ type: 'CAST_BALLOT', voterId: anyone(), candidateId: anyone() }),
+          () => ({ type: 'ABSTAIN', voterId: anyone() }),
+          () => ({ type: 'TAP_ELIMINATE', candidateId: anyone() }),
+          () => ({ type: 'RESOLVE_TIE', rule: oneOf(TIE_RULES) }),
+          () => ({ type: 'SUBMIT_GUESS', text: oneOf([s.civilianWord, 'nope']) }),
+          () => ({ type: 'OVERRIDE_GUESS', correct: r() < 0.5 }),
+          () => ({ type: 'REMOVE_PLAYER', playerId: anyone() }),
+        ])();
+
+      let step = 0;
+      for (; step < 5000 && s.phase !== 'gameOver'; step++) {
+        const bad = checkInvariants(s);
+        if (bad.length) expect(bad, `seed ${seed} step ${step}`).toEqual([]);
+
+        const action = r() < 0.15 ? stray() : sensible();
+        if (action.type === 'REMOVE_PLAYER') walkouts++;
+        const before = s;
+        s = reduce(s, action);
+        if (s.phase !== 'gameOver' && JSON.stringify(s.scores) !== JSON.stringify(before.scores)) {
+          expect(s.scores, `seed ${seed} step ${step}: ${action.type} moved points mid-game`).toEqual(
+            before.scores,
+          );
+        }
+      }
+
+      expect(s.phase, `seed ${seed} did not terminate`).toBe('gameOver');
+      const bad = checkInvariants(s);
+      if (bad.length) expect(bad, `seed ${seed} at game over`).toEqual([]);
+
+      // A finished game is final: nothing but a new game may change it.
+      for (let k = 0; k < 20; k++) {
+        const action = stray();
+        const after = reduce(s, action);
+        if (after !== s) {
+          expect(after, `seed ${seed}: ${action.type} changed a finished game`).toEqual(s);
+        }
+      }
+    }
+
+    // The fuzz is only as good as what it reached.
+    expect(secret).toBeGreaterThan(500);
+    expect(ties).toBeGreaterThan(200);
+    expect(walkouts).toBeGreaterThan(500);
   });
 
   it('G5 BLOCKER — play again resets everything except roster, setup and scores', () => {
