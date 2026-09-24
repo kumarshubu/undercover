@@ -4,12 +4,23 @@
  *
  * Each entry breaks exactly one real line and names the test that MUST catch it.
  * If the suite still passes, that test is decorative and the harness says so.
+ * Entries marked `runner: 'ui'` break a screen and run the jest suite instead.
  */
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 
 const ENGINE = 'src/engine/engine.ts';
 const RNG = 'src/engine/rng.ts';
+const GAME_UI = 'src/ui/Game.tsx';
+const OUTCOME_UI = 'src/ui/OutcomeScreens.tsx';
+const VOTE_UI = 'src/ui/VoteScreen.tsx';
+
+// Both runners write the same report shape: testResults[].assertionResults[].
+const REPORT = '/tmp/mut.json';
+const RUNNERS = {
+  engine: `npx vitest run src/engine --reporter=json --outputFile=${REPORT}`,
+  ui: `npx jest --json --outputFile=${REPORT}`,
+};
 
 const MUTATIONS = [
   {
@@ -156,6 +167,46 @@ const MUTATIONS = [
     to: `            () => true,`,
     mustFail: 'G3',
   },
+  {
+    name: "show an eliminated player's word to the table",
+    runner: 'ui',
+    file: OUTCOME_UI,
+    from: `        was {victim ? ROLE[victim.role] : '?'}`,
+    to: `        was {victim ? \`\${ROLE[victim.role]} \${victim.word}\` : '?'}`,
+    mustFail: 'GU8',
+  },
+  {
+    name: 'reveal the civilian word after a wrong guess',
+    runner: 'ui',
+    file: OUTCOME_UI,
+    from: `      <Body>That's not the word.</Body>`,
+    to: `      <Body>That's not the word. It was {state.civilianWord}.</Body>`,
+    mustFail: 'GU5',
+  },
+  {
+    name: 'let a double-tap count the guess',
+    runner: 'ui',
+    file: OUTCOME_UI,
+    from: `    if (Date.now() < armedAt.current) return; //   a double-tap is not a decision`,
+    to: ``,
+    mustFail: 'GU6',
+  },
+  {
+    name: 'drop the dead zone between screens',
+    runner: 'ui',
+    file: GAME_UI,
+    from: `      if (now - lastAt.current < deadZoneMs) return;`,
+    to: ``,
+    mustFail: 'GU7',
+  },
+  {
+    name: 'offer players who are out in the vote',
+    runner: 'ui',
+    file: VOTE_UI,
+    from: `  const candidates = alivePlayers(state).filter(`,
+    to: `  const candidates = state.players.filter(`,
+    mustFail: 'GU3',
+  },
 ];
 
 const originals = new Map();
@@ -183,14 +234,13 @@ for (const m of MUTATIONS) {
 
   let failedTests = '';
   let passed = true;
+  rmSync(REPORT, { force: true }); // never read the previous mutation's report
   try {
-    execSync('npx vitest run src/engine --reporter=json --outputFile=/tmp/mut.json', {
-      stdio: 'pipe',
-    });
+    execSync(RUNNERS[m.runner ?? 'engine'], { stdio: 'pipe' });
   } catch {
     passed = false;
     try {
-      const report = JSON.parse(readFileSync('/tmp/mut.json', 'utf8'));
+      const report = JSON.parse(readFileSync(REPORT, 'utf8'));
       failedTests = report.testResults
         .flatMap((f) => f.assertionResults ?? [])
         .filter((t) => t.status === 'failed')
