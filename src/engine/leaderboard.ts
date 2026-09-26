@@ -55,6 +55,27 @@ export function recordGame(board: Leaderboard, results: readonly PlayerResult[])
   return next;
 }
 
+/**
+ * Two boards added together, player by player. Undoing a reset uses it, so a
+ * game played after the reset is kept rather than lost. The newer board's
+ * spelling of a name wins.
+ */
+export function mergeBoards(older: Leaderboard, newer: Leaderboard): Leaderboard {
+  const next = { ...older };
+  for (const [key, s] of Object.entries(newer)) {
+    const prev = next[key];
+    next[key] = prev
+      ? {
+          name: s.name,
+          points: prev.points + s.points,
+          wins: prev.wins + s.wins,
+          games: prev.games + s.games,
+        }
+      : s;
+  }
+  return next;
+}
+
 /** Most points first; ties go to more wins, then fewer games, then name. */
 export function ranked(board: Leaderboard): Standing[] {
   return Object.values(board).sort(

@@ -30,6 +30,17 @@ describe('L — word list upload', () => {
     expect(parseWordList('चाय / कॉफी').pairs).toEqual([pair('चाय', 'कॉफी')]);
   });
 
+  it('L3b Hindi words that differ only in a vowel sign are a real pair', () => {
+    expect(parseWordList('दिल / दाल').pairs).toEqual([pair('दिल', 'दाल')]);
+  });
+
+  it('L3c a pair that differs only by the dot under a letter is one word', () => {
+    // The guess ignores that dot, so Mr White would win by naming either one.
+    const { pairs, skipped } = parseWordList('राज / राज़');
+    expect(pairs).toEqual([]);
+    expect(skipped[0].reason).toBe('both words are the same');
+  });
+
   it('L4 skips bad lines and says which, by line number', () => {
     const text = [
       'Coffee / Tea', //                  1 ok

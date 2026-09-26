@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { newGame, reduce } from '../engine';
-import { gameResults, ranked, recordGame, type Leaderboard, type PlayerResult } from '../leaderboard';
+import {
+  gameResults,
+  mergeBoards,
+  ranked,
+  recordGame,
+  type Leaderboard,
+  type PlayerResult,
+} from '../leaderboard';
 import { MAX_NAME_LENGTH, nameKey, nameProblem } from '../setup';
 import type { GameState } from '../types';
 
@@ -83,5 +90,23 @@ describe('P — points and the leaderboard', () => {
     const board: Leaderboard = { ken: { name: 'Ken', points: 1, wins: 1, games: 1 } };
     recordGame(board, [{ name: 'Ken', role: 'civilian', points: 2, won: true }]);
     expect(board.ken.points).toBe(1);
+  });
+
+  it('P6 undoing a reset adds the wiped scores back to anything played since', () => {
+    const wiped: Leaderboard = {
+      ken: { name: 'Ken', points: 10, wins: 1, games: 2 },
+      ankit: { name: 'Ankit', points: 4, wins: 2, games: 3 },
+    };
+    const since: Leaderboard = {
+      ken: { name: 'KEN', points: 2, wins: 1, games: 1 },
+      rajiv: { name: 'Rajiv', points: 0, wins: 0, games: 1 },
+    };
+    expect(mergeBoards(wiped, since)).toEqual({
+      ken: { name: 'KEN', points: 12, wins: 2, games: 3 }, //  the newer spelling is shown
+      ankit: { name: 'Ankit', points: 4, wins: 2, games: 3 },
+      rajiv: { name: 'Rajiv', points: 0, wins: 0, games: 1 },
+    });
+    expect(mergeBoards(wiped, {})).toEqual(wiped); //          nothing played since: exactly as before
+    expect(wiped.ken.points).toBe(10); //                      inputs untouched
   });
 });

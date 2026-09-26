@@ -220,6 +220,8 @@ describe('someone leaves', () => {
       press('leave-confirm');
     }
     expect(on('gameover-screen')).toBe(true);
+    // Nobody is paid, so nobody is called the winner either.
+    expect(screen.getByTestId('gameover-winner').props.children).toBe('No winner');
     expect(screen.getByText(`Ended when ${infiltrators[infiltrators.length - 1].name} left. No points this game.`)).toBeTruthy();
     expect(screen.getAllByText('+0 pts')).toHaveLength(5);
   });

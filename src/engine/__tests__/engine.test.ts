@@ -312,6 +312,33 @@ describe('M — Mr White', () => {
     expect(normalizeGuess('Ünïcôde  Test')).toBe('unicode test');
   });
 
+  it('M5c a guess is kept without stray spaces or punctuation around it', () => {
+    const toGuess = () =>
+      reduce(reduce(base(), { type: 'TAP_ELIMINATE', candidateId: 'p4' }), { type: 'CONTINUE' });
+    const kept = (text: string) =>
+      reduce(toGuess(), { type: 'SUBMIT_GUESS', text }).players.find((p) => p.id === 'p4')!.guess?.text;
+    expect(kept('  “nope!”  ')).toBe('nope');
+    expect(kept("ice-cream's!")).toBe("ice-cream's"); //  inside the word is left alone
+    expect(kept(' कॉफी! ')).toBe('कॉफी'); //              a final vowel sign is part of the word
+    // Nothing but punctuation is not a guess at all.
+    expect(reduce(toGuess(), { type: 'SUBMIT_GUESS', text: '?!' }).phase).toBe('mrWhiteGuess');
+  });
+
+  it('M5d the dot under a Hindi letter is optional, like an accent', () => {
+    expect(guessMatches('कॉफी', 'कॉफ़ी')).toBe(true);
+    expect(guessMatches('जरूरी', 'ज़रूरी')).toBe(true);
+    expect(guessMatches('दाल', 'दिल')).toBe(false); //  vowel signs still count
+  });
+
+  it('M5b a Hindi guess has to get the vowel signs right too', () => {
+    // दिल (heart) and दाल (lentils) differ only in their vowel sign.
+    expect(guessMatches('दाल', 'दिल')).toBe(false);
+    expect(guessMatches('दिल', 'दिल')).toBe(true); //         control: the right word still matches
+    expect(guessMatches(' कॉफी! ', 'कॉफी')).toBe(true); //    spaces and punctuation still ignored
+    // फ़ typed as one character or as फ plus a dot is the same letter.
+    expect(guessMatches('\u095E', '\u092B\u093C')).toBe(true);
+  });
+
   it('M8 BLOCKER — overriding a wrong guess to correct scores without crashing', () => {
     let s = kill(base(), ['p3']);
     s = reduce(s, { type: 'TAP_ELIMINATE', candidateId: 'p4' });

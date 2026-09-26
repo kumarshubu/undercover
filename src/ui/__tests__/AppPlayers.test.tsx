@@ -139,4 +139,63 @@ describe('app — players and leaderboard', () => {
     expect(on('ballot-handoff')).toBe(true); //  not the out-loud vote screen
     expect(on('vote-screen')).toBe(false);
   });
+
+  const SAVED = { asha: { name: 'Asha', points: 4, wins: 2, games: 3 } };
+  const lastSaved = () => mockSaveLeaderboard.mock.calls.at(-1)?.[0];
+  const wipe = () => {
+    press('leaderboard-reset');
+    settle();
+    press('leaderboard-reset');
+    settle();
+  };
+
+  it('AP7 a reset can be undone, even after closing the leaderboard', () => {
+    render(<App />);
+    press('setup-leaderboard');
+    wipe();
+    expect(lastSaved()).toEqual({});
+
+    press('leaderboard-done'); //  change of mind comes a little later
+    press('setup-leaderboard');
+    press('leaderboard-undo');
+    expect(lastSaved()).toEqual(SAVED);
+    expect(on('leaderboard-undo')).toBe(false); //  once only: the scores can't be added back twice
+    expect(on('leaderboard-row-0')).toBe(true);
+  });
+
+  it('AP8 undo keeps a game played after the reset, and adds the old scores back to it', () => {
+    render(<App />);
+    press('setup-leaderboard');
+    wipe();
+    press('leaderboard-done');
+
+    press('setup-start'); //  5 players: Asha..Eli
+    deal();
+    playToEnd();
+    press('gameover-leaderboard');
+    settle();
+    press('leaderboard-undo');
+
+    const board = lastSaved() as Record<string, { games: number }>;
+    expect(board.asha.games).toBe(4); //   3 from before the reset + this one
+    expect(board.bilal.games).toBe(1);
+  });
+
+  it('AP9 two resets in a row are undone together', () => {
+    render(<App />);
+    press('setup-leaderboard');
+    wipe(); //                                   wipes Asha's 3 saved games
+    press('leaderboard-done');
+    press('setup-start');
+    deal();
+    playToEnd();
+    press('gameover-leaderboard');
+    settle();
+    wipe(); //                                   wipes the game just played
+    press('leaderboard-undo');
+
+    const board = lastSaved() as Record<string, { games: number }>;
+    expect(board.asha.games).toBe(4); //   neither reset's scores are lost
+    expect(board.bilal.games).toBe(1);
+  });
 });

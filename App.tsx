@@ -11,7 +11,12 @@ import { loadLeaderboard, loadRoster, saveLeaderboard, saveRoster } from './src/
 import { loadSettings, saveSettings } from './src/ui/settingsStore';
 import { newGame } from './src/engine/engine';
 import { BUILT_IN_PAIRS } from './src/engine/builtinWords';
-import { recordGame, type Leaderboard, type PlayerResult } from './src/engine/leaderboard';
+import {
+  mergeBoards,
+  recordGame,
+  type Leaderboard,
+  type PlayerResult,
+} from './src/engine/leaderboard';
 import { pickPair, recentWindow, type WordList } from './src/engine/wordlist';
 import type { GameState, Settings, SetupCounts, WordPair } from './src/engine/types';
 import { c } from './src/ui/theme';
@@ -38,6 +43,8 @@ function Session() {
   const [wordList, setWordList] = useState<WordList | null>(loadWordList);
   const [roster, setRoster] = useState<string[]>(() => loadRoster() ?? NAMES);
   const [board, setBoard] = useState<Leaderboard>(loadLeaderboard);
+  // What resetting wiped, kept so the reset can be undone until the app closes.
+  const [wiped, setWiped] = useState<Leaderboard | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
 
   const changeSettings = (next: Settings) => {
@@ -123,7 +130,18 @@ function Session() {
         <View style={s.fill}>
           <LeaderboardScreen
             board={board}
-            onReset={() => setBoard({})}
+            onReset={() => {
+              setWiped((w) => mergeBoards(w ?? {}, board));
+              setBoard({});
+            }}
+            onUndo={
+              wiped
+                ? () => {
+                    setBoard((b) => mergeBoards(wiped, b));
+                    setWiped(null);
+                  }
+                : undefined
+            }
             onDone={() => setShowBoard(false)}
           />
         </View>

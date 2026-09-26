@@ -2,7 +2,8 @@
  * The leaderboard: everyone who has played on this phone, ranked by points.
  *
  * Resetting wipes every game ever recorded, so it takes two taps with a pause
- * between them — the same guard as counting Mr White's guess.
+ * between them — the same guard as counting Mr White's guess. It can still be
+ * undone until the app is closed.
  */
 
 import { useRef, useState } from 'react';
@@ -15,6 +16,8 @@ import { c, radius, space, type } from './theme';
 export interface LeaderboardScreenProps {
   board: Leaderboard;
   onReset: () => void;
+  /** Given while a reset can still be taken back. */
+  onUndo?: () => void;
   onDone: () => void;
   deadZoneMs?: number;
 }
@@ -22,12 +25,14 @@ export interface LeaderboardScreenProps {
 export function LeaderboardScreen({
   board,
   onReset,
+  onUndo,
   onDone,
   deadZoneMs = DEAD_ZONE_MS,
 }: LeaderboardScreenProps) {
   const rows = ranked(board);
   const [confirming, setConfirming] = useState(false);
   const armedAt = useRef(0);
+  const resetAt = useRef(0);
 
   const reset = () => {
     if (!confirming) {
@@ -37,7 +42,15 @@ export function LeaderboardScreen({
     }
     if (Date.now() < armedAt.current) return; //   a double-tap is not a decision
     setConfirming(false);
+    resetAt.current = Date.now();
     onReset();
+  };
+
+  const undo = () => {
+    // Undo appears as the scores go, so the wiping tap's double-tap would
+    // otherwise take it straight back.
+    if (Date.now() - resetAt.current < deadZoneMs) return;
+    onUndo?.();
   };
 
   return (
@@ -46,7 +59,11 @@ export function LeaderboardScreen({
       <Title>Leaderboard</Title>
 
       {rows.length === 0 ? (
-        <Body>No games finished yet. Play one and the points show up here.</Body>
+        <Body>
+          {onUndo
+            ? 'All scores wiped.'
+            : 'No games finished yet. Play one and the points show up here.'}
+        </Body>
       ) : (
         <View style={s.table}>
           <View style={[s.row, s.head]}>
@@ -79,6 +96,14 @@ export function LeaderboardScreen({
           variant="secondary"
           label={confirming ? 'Tap again to wipe every score' : 'Reset leaderboard'}
           onPress={reset}
+        />
+      )}
+      {onUndo && (
+        <Button
+          testID="leaderboard-undo"
+          variant="secondary"
+          label="Undo reset"
+          onPress={undo}
         />
       )}
     </Screen>

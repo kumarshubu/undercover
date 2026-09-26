@@ -85,15 +85,28 @@ export function award(s: GameState): Record<string, number> {
 
 // ---------------------------------------------------------------- guess match
 
-/** lowercase -> NFD -> strip diacritics -> strip punctuation -> collapse spaces. */
+/**
+ * lowercase -> NFD -> strip Latin accents and the Hindi nukta -> strip
+ * punctuation -> collapse spaces.
+ *
+ * Only accent-like marks are stripped. Other marks stay: in Hindi the vowel
+ * signs are marks, and दिल (heart) and दाल (lentils) differ only there. The
+ * nukta (the dot in ज़, फ़) is treated like an accent — phone keyboards make it
+ * awkward to type, so कॉफी and कॉफ़ी are one guess.
+ */
 export function normalizeGuess(text: string): string {
   return text
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/[\u0300-\u036f\u093c]/g, '')
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, '')
     .trim()
     .replace(/\s+/g, ' ');
+}
+
+/** The guess as it is kept and shown: no spaces or punctuation around it. */
+export function tidyGuess(text: string): string {
+  return text.replace(/^[^\p{L}\p{M}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu, '').replace(/\s+/g, ' ');
 }
 
 /** Exact compare after normalising, plus author-supplied aliases. No fuzzy matching. */
@@ -475,9 +488,11 @@ export function reduce(s: GameState, action: GameAction): GameState {
 
     case 'SUBMIT_GUESS': {
       if (s.phase !== 'mrWhiteGuess' || !s.pendingEliminationId) return s;
-      const correct = guessMatches(action.text, s.civilianWord, s.pair.aliases);
+      const text = tidyGuess(action.text);
+      if (!text) return s; //  punctuation alone is not a guess
+      const correct = guessMatches(text, s.civilianWord, s.pair.aliases);
       const next = withPlayer(s, s.pendingEliminationId, {
-        guess: { text: action.text, correct },
+        guess: { text, correct },
       });
       if (correct) return toGameOver({ ...next, phase: 'mrWhiteGuessResult' }, 'mrWhiteGuess');
       return { ...next, phase: 'mrWhiteGuessResult' };

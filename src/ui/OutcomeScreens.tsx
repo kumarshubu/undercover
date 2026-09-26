@@ -10,6 +10,7 @@
 
 import { useRef, useState } from 'react';
 import { KeyboardAvoidingView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { tidyGuess } from '../engine/engine';
 import type { GameState, Role, Winner } from '../engine/types';
 import { Body, Button, Kicker, Note, Screen, Title } from './parts';
 import { nameOf, type ScreenProps } from './RoundScreens';
@@ -43,9 +44,9 @@ export function EliminationScreen({ state, dispatch }: ScreenProps) {
 
 export function GuessScreen({ state, dispatch }: ScreenProps) {
   const [text, setText] = useState('');
-  const ready = text.trim().length > 0;
+  const ready = tidyGuess(text).length > 0;
   const submit = () => {
-    if (ready) dispatch({ type: 'SUBMIT_GUESS', text: text.trim() });
+    if (ready) dispatch({ type: 'SUBMIT_GUESS', text });
   };
 
   return (
@@ -153,7 +154,9 @@ export function GameOverScreen({
   return (
     <Screen testID="gameover-screen">
       <Kicker>GAME OVER</Kicker>
-      <Title testID="gameover-winner">{state.winner ? HEADLINE[state.winner] : ''}</Title>
+      <Title testID="gameover-winner">
+        {walkout ? 'No winner' : state.winner ? HEADLINE[state.winner] : ''}
+      </Title>
       <Body>{why}</Body>
 
       {/* Game over is the one place words may be shown to the whole table. */}

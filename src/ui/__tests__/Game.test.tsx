@@ -138,6 +138,15 @@ describe('game — Mr White', () => {
     expect(screen.getByText('+6 pts')).toBeTruthy();
   });
 
+  it('GU4b the guess is shown without stray punctuation; punctuation alone is no guess', () => {
+    const { s, mw } = toGuess();
+    fireEvent.changeText(screen.getByTestId('guess-input'), '?!');
+    expect(screen.getByTestId('guess-submit').props.accessibilityState.disabled).toBe(true);
+    fireEvent.changeText(screen.getByTestId('guess-input'), ` ${s.civilianWord}! `);
+    press('guess-submit');
+    expect(screen.getByText(`${mw.name} guessed “${s.civilianWord}”.`)).toBeTruthy();
+  });
+
   it('GU5 a wrong guess is shown, the word is not, and counting it takes two taps', () => {
     const { s } = toGuess();
     fireEvent.changeText(screen.getByTestId('guess-input'), 'latte');
